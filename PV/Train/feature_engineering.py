@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-from .data_utils import get_meteo_for_day, load_power_data
+# 将相对导入改为绝对导入
+from data_utils import get_meteo_for_day, load_power_data
 
 def create_feature_dataset(station_id, start_date, end_date):
     """为指定站点和日期范围创建特征数据集"""
@@ -28,7 +29,8 @@ def create_feature_dataset(station_id, start_date, end_date):
         if len(next_day_power) != 96:
             temp_df = pd.DataFrame(index=expected_times)
             temp_df = temp_df.join(next_day_power)
-            temp_df = temp_df.fillna(method='ffill').fillna(method='bfill').fillna(0)
+            # 修改这一行
+            temp_df = temp_df.ffill().bfill().fillna(0)
             next_day_power = temp_df
         for i, time_point in enumerate(expected_times):
             hour = time_point.hour

@@ -45,6 +45,57 @@ def create_feature_dataset(station_id, start_date, end_date):
             print(f"站点 {station_id} 的 {day_str} 气象数据为空，跳过")
             continue
         
+        # 气压特征PCA处理
+        # 气压特征PCA处理 - 修改为保留原始特征
+        pressure_cols = ['sp_NWP_1', 'sp_NWP_3', 'msl_NWP_2']
+        if all(col in meteo_df.columns for col in pressure_cols):
+            from sklearn.decomposition import PCA
+            pressure_data = meteo_df[pressure_cols].values
+            pca = PCA(n_components=1)
+            pressure_pc1 = pca.fit_transform(pressure_data)
+            meteo_df['pressure_pc1'] = pressure_pc1.flatten()
+            # 不再移除原始气压特征
+            # meteo_df = meteo_df.drop(pressure_cols, axis=1)
+        else:
+            print(f"警告: 站点 {station_id} 的气象数据中缺少气压特征列")
+            if 'sp_NWP_1' in meteo_df.columns:
+                meteo_df['pressure_pc1'] = meteo_df['sp_NWP_1']
+            elif 'msl_NWP_2' in meteo_df.columns:
+                meteo_df['pressure_pc1'] = meteo_df['msl_NWP_2']
+            else:
+                meteo_df['pressure_pc1'] = 0.0
+        
+        # 打印气象数据的列名，帮助调试
+        # print(f"气象数据列名: {meteo_df.columns.tolist()}")
+        
+        # 检查是否存在风速分量列，考虑NWP后缀
+        u_cols = [col for col in meteo_df.columns if col.startswith('u100_NWP')]
+        v_cols = [col for col in meteo_df.columns if col.startswith('v100_NWP')]
+        
+        if u_cols and v_cols:
+            # 使用第一个NWP模型的风速分量
+            u_col = u_cols[0]
+            v_col = v_cols[0]
+            # print(f"使用风速分量列: {u_col}, {v_col}")
+            
+            # 添加风速特征 - 经纬度两个方向的风速进行向量计算得到总风速
+            meteo_df['wind_speed'] = np.sqrt(meteo_df[u_col]**2 + meteo_df[v_col]**2)
+            
+            # 添加风速的立方值作为特征，因为风能与风速的三次方成正比
+            # meteo_df['wind_speed_cubed'] = meteo_df['wind_speed']**3
+            
+            # 计算风向（气象惯例：0°为北，90°为东）
+            # wind_direction = (270 - np.arctan2(meteo_df[v_col], meteo_df[u_col]) * (180 / np.pi)) % 360
+            # meteo_df['sin_wind_direction'] = np.sin(np.radians(wind_direction))
+            # meteo_df['cos_wind_direction'] = np.cos(np.radians(wind_direction))
+        else:
+            # 如果没有风速相关列，添加一个默认值
+            print(f"警告: 站点 {station_id} 的气象数据中没有找到风速分量列，使用默认值")
+            meteo_df['wind_speed'] = 0.0
+            # # meteo_df['wind_speed_cubed'] = 0.0
+            # meteo_df['sin_wind_direction'] = 0.0
+            # meteo_df['cos_wind_direction'] = 0.0
+        
         # 获取次日功率数据（预测目标）
         next_day_power = power_df.loc[next_day_str:next_day_str]
         if next_day_power.empty:
@@ -77,7 +128,8 @@ def create_feature_dataset(station_id, start_date, end_date):
             # 添加时间特征
             hour_meteo['hour'] = float(hour)
             hour_meteo['minute'] = float(minute)
-            hour_meteo['time_index'] = float(i)  # 0-95的时间索引
+            # 修改time_index计算方式，使用更精确的公式
+            hour_meteo['time_index'] = float((time_point.hour * 4) + (time_point.minute // 15))  # 0-95的时间索引
             
             # 添加日期特征
             hour_meteo['day_of_week'] = float(time_point.dayofweek)

@@ -1,10 +1,16 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+# 添加中文字体支持
+import matplotlib
+matplotlib.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
+matplotlib.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import os
-from .config import OUTPUT_PATH
-from .data_utils import load_power_data
+# 将相对导入改为绝对导入
+from config import OUTPUT_PATH
+# 这里也需要改为绝对导入
+from data_utils import load_power_data
 
 def evaluate_model(station_id, models, test_start_date, test_end_date, predict_func, get_meteo_for_day_func):
     """评估模型在测试集上的性能"""
@@ -32,7 +38,8 @@ def evaluate_model(station_id, models, test_start_date, test_end_date, predict_f
         if len(actual_df) != 96:
             temp_df = pd.DataFrame(index=expected_times)
             temp_df = temp_df.join(actual_df)
-            temp_df = temp_df.fillna(method='ffill').fillna(method='bfill').fillna(0)
+            # 修改这一行
+            temp_df = temp_df.ffill().bfill().fillna(0)
             actual_df = temp_df
         y_pred = pred_df['power'].values
         y_true = actual_df['power'].values

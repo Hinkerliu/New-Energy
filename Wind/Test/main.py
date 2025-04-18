@@ -23,8 +23,8 @@ def run_inference():
         print_info(f"开始处理风电场站{station_id}的推理...")
         
         # 加载模型
-        models = load_model(station_id)
-        if models is None:
+        model = load_model(station_id)
+        if model is None:
             continue
         
         # 获取测试日期
@@ -42,7 +42,7 @@ def run_inference():
             print_info(f"预测站点{station_id}的日期{day_str}...")
             
             # 预测
-            pred_df = predict_with_lightgbm(station_id, day_str, models)
+            pred_df = predict_with_lightgbm(station_id, day_str, model)
             if pred_df is not None:
                 # 添加到预测列表
                 all_predictions.append(pred_df)

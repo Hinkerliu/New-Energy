@@ -15,20 +15,31 @@ def main():
     test_end_date = '2024-12-30'
     results = []
     models_dict = {}
+    
     for station_id in solar_stations:
         print(f"\n开始处理光伏场站 {station_id}...")
+        
+        # 创建特征数据集
         features_df = create_feature_dataset(station_id, train_start_date, train_end_date)
+        
         if features_df is not None:
-            models = train_lightgbm_model(features_df, station_id)
-            if models:
-                models_dict[station_id] = models
+            # 训练统一模型
+            model = train_lightgbm_model(features_df, station_id)
+            
+            if model:
+                models_dict[station_id] = model
+                
+                # 评估模型
                 eval_result = evaluate_model(
-                    station_id, models, test_start_date, test_end_date,
+                    station_id, model, test_start_date, test_end_date,
                     predict_func=predict_with_lightgbm,
                     get_meteo_for_day_func=get_meteo_for_day
                 )
+                
                 if eval_result:
                     results.append(eval_result)
+    
+    # 输出评估结果
     if results:
         results_df = pd.DataFrame(results)
         print("\n所有光伏场站评估结果:")
@@ -36,6 +47,8 @@ def main():
         avg_accuracy = results_df['avg_daily_accuracy'].mean()
         print(f"\n所有光伏场站平均准确率: {avg_accuracy:.4f}")
         results_df.to_csv(os.path.join(OUTPUT_PATH, "solar_stations_results.csv"), index=False)
+    
+    # 生成提交文件
     submission_dir = os.path.join(OUTPUT_PATH, "submission")
     if models_dict:
         generate_submission_files(

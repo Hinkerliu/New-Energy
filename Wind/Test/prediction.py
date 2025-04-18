@@ -8,27 +8,30 @@ import joblib
 from config import MODEL_PATH, OUTPUT_PATH
 from data_loader import get_meteo_for_day
 from feature_engineering import add_time_features, ensure_numeric_features, prepare_features_for_model
+from utils import print_info, print_warning, print_error  # 确保导入了 print_error
 
-def predict_with_lightgbm(station_id, day_str, models):
+# 修改 predict_with_lightgbm 函数，使其适应单一模型而非模型字典
+def predict_with_lightgbm(station_id, day_str, model):
     """
     使用训练好的LightGBM模型进行预测
     
     参数:
-        station_id (int): 站点ID
-        day_str (str): 日期字符串，格式 YYYYMMDD
-        models (dict): 模型字典，键为时间点索引，值为模型对象
-        
+    - station_id: 站点ID
+    - day_str: 日期字符串，格式 YYYYMMDD
+    - model: 训练好的模型
+    
     返回:
-        pandas.DataFrame 或 None: 预测结果数据框，预测失败则返回None
+    - 预测结果 DataFrame
     """
     # 日期转换
     date = pd.to_datetime(day_str)
     next_day = date + pd.Timedelta(days=1)
+    next_day_str = next_day.strftime('%Y-%m-%d')
     
     # 获取气象数据
     meteo_df = get_meteo_for_day(station_id, day_str)
     if meteo_df.empty:
-        print(f"警告: 站点{station_id}的{day_str}气象数据为空，无法预测")
+        print_warning(f"站点 {station_id} 的 {day_str} 气象数据为空，无法预测")
         return None
     
     # 创建预测时间点
@@ -38,6 +41,7 @@ def predict_with_lightgbm(station_id, day_str, models):
     # 为每个15分钟时间点预测
     for i, time_point in enumerate(prediction_times):
         hour = time_point.hour
+        minute = time_point.minute
         
         # 获取对应小时的气象数据
         if hour in meteo_df.index:
@@ -48,34 +52,55 @@ def predict_with_lightgbm(station_id, day_str, models):
             hour_meteo = meteo_df.loc[closest_hour].copy()
         
         # 添加时间特征
-        hour_meteo = add_time_features(hour_meteo, time_point)
+        hour_meteo['hour'] = float(hour)
+        hour_meteo['minute'] = float(minute)
+        hour_meteo['time_index'] = float(i)  # 添加时间索引作为特征
+        
+        # 添加日期特征
+        hour_meteo['day_of_week'] = float(time_point.dayofweek)
+        hour_meteo['day_of_year'] = float(time_point.dayofyear)
+        hour_meteo['month'] = float(time_point.month)
+        hour_meteo['is_weekend'] = float(1 if time_point.dayofweek >= 5 else 0)
+        
+        # 添加周期性特征
+        hour_meteo['sin_hour'] = np.sin(2 * np.pi * hour / 24)
+        hour_meteo['cos_hour'] = np.cos(2 * np.pi * hour / 24)
+        hour_meteo['sin_minute'] = np.sin(2 * np.pi * (hour * 60 + minute) / (24 * 60))
+        hour_meteo['cos_minute'] = np.cos(2 * np.pi * (hour * 60 + minute) / (24 * 60))
+        hour_meteo['sin_day'] = np.sin(2 * np.pi * time_point.dayofyear / 366)
+        hour_meteo['cos_day'] = np.cos(2 * np.pi * time_point.dayofyear / 366)
         
         # 转换为DataFrame
         features = pd.DataFrame([hour_meteo])
         
         # 确保所有特征都是数值类型
-        features = ensure_numeric_features(features)
-        
-        # 使用对应时间点的模型预测
-        if i in models:
-            model = models[i]
-        else:
-            # 如果没有对应时间点的模型，使用最近的模型
-            closest_idx = min(models.keys(), key=lambda x: abs(x - i))
-            model = models[closest_idx]
+        for col in features.columns:
+            if not np.issubdtype(features[col].dtype, np.number):
+                try:
+                    features[col] = features[col].astype(float)
+                except:
+                    # 如果无法转换，使用0填充
+                    features[col] = 0
         
         # 获取模型使用的特征名称
         model_features = model.feature_name()
         
-        # 准备特征
-        features_filtered = prepare_features_for_model(features, model_features)
+        # 只保留模型使用的特征
+        features_filtered = features[model_features] if all(f in features.columns for f in model_features) else None
         
-        # 预测
-        pred = model.predict(features_filtered)[0]
+        if features_filtered is not None:
+            pred = model.predict(features_filtered)[0]
+        else:
+            # 如果特征不匹配，创建一个与模型特征匹配的DataFrame
+            features_dict = {f: [0] for f in model_features}
+            for f in model_features:
+                if f in features.columns:
+                    features_dict[f] = [features[f].iloc[0]]
+            features_filtered = pd.DataFrame(features_dict)
+            pred = model.predict(features_filtered)[0]
         
         # 确保预测值在[0,1]范围内
         pred = max(0, min(1, pred))
-        
         predictions.append(pred)
     
     # 创建预测结果DataFrame
@@ -89,26 +114,39 @@ def predict_with_lightgbm(station_id, day_str, models):
 
 def load_model(station_id):
     """
-    加载指定站点的模型
+    加载训练好的模型
     
     参数:
-        station_id (int): 站点ID
-        
-    返回:
-        dict 或 None: 模型字典，加载失败则返回None
-    """
-    model_file = os.path.join(MODEL_PATH, f"lightgbm_station_{station_id}.pkl")
-    if not os.path.exists(model_file):
-        print(f"错误: 站点{station_id}的模型文件不存在: {model_file}")
-        return None
+    - station_id: 站点ID
     
-    try:
-        models = joblib.load(model_file)
-        print(f"信息: 成功加载站点{station_id}的模型")
-        return models
-    except Exception as e:
-        print(f"错误: 加载站点{station_id}的模型时出错: {e}")
-        return None
+    返回:
+    - 加载的模型
+    """
+    # 添加新的模型路径 - 模型文件存放在 c:\New-Energy\models\ 目录
+    possible_paths = [
+        os.path.join("c:", "New-Energy", "models", f"lightgbm_station_{station_id}.pkl"),  # 新添加的路径
+        os.path.join("..", "..", "output", f"lightgbm_station_{station_id}.pkl"),  # 相对路径
+        os.path.join("output", f"lightgbm_station_{station_id}.pkl"),  # 当前目录下的output
+        os.path.join("..", "Train", "output", f"lightgbm_station_{station_id}.pkl"),  # Train目录下的output
+        os.path.join("..", "..", "..", "output", f"lightgbm_station_{station_id}.pkl")  # 更上层目录
+    ]
+    
+    # 尝试绝对路径
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    possible_paths.append(os.path.join(base_dir, "output", f"lightgbm_station_{station_id}.pkl"))
+    
+    for model_path in possible_paths:
+        try:
+            if os.path.exists(model_path):
+                model = joblib.load(model_path)
+                print_info(f"成功加载站点{station_id}的模型，路径: {model_path}")
+                return model
+        except Exception as e:
+            continue
+    
+    # 如果所有路径都失败，打印错误并返回None
+    print_error(f"加载站点{station_id}的模型失败: 找不到模型文件。尝试的路径: {possible_paths}")
+    return None
 
 def save_predictions(station_id, predictions_df):
     """

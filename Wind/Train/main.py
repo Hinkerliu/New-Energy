@@ -24,16 +24,28 @@ def main():
         features_df = create_feature_dataset(station_id, TRAIN_START_DATE, TRAIN_END_DATE)
         
         if features_df is not None:
-            # 2. 训练模型
-            print(f"训练站点 {station_id} 的模型...")
-            models = train_lightgbm_model(features_df, station_id)
+            # 2. 训练模型 - 现在训练单一模型而不是多个时间点模型
+            print(f"训练站点 {station_id} 的统一模型...")
+            if features_df is None or features_df.empty:
+                print(f"错误: 站点 {station_id} 的特征数据集为空，无法训练模型")
+                continue
+            else:
+                print(f"站点 {station_id} 的特征数据集形状: {features_df.shape}")
+                
+            model = train_lightgbm_model(features_df, station_id)
             
-            if models:
+            if model:
+                print(f"站点 {station_id} 的模型训练成功")
                 # 3. 评估模型
                 print(f"评估站点 {station_id} 的模型性能...")
-                eval_result = evaluate_model(station_id, models, TEST_START_DATE, TEST_END_DATE)
+                eval_result = evaluate_model(station_id, model, TEST_START_DATE, TEST_END_DATE)
                 if eval_result:
+                    print(f"站点 {station_id} 的模型评估成功: {eval_result}")
                     results.append(eval_result)
+                else:
+                    print(f"站点 {station_id} 的模型评估失败")
+            else:
+                print(f"站点 {station_id} 的模型训练失败")
     
     # 汇总结果
     if results:
